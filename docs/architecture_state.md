@@ -7,6 +7,7 @@ The **CLI JSON to CSV Converter** is a high-performance, resource-efficient comm
 - **`json2csv` (Package)**: The core namespace containing the application's CLI driver and translation engine modules.
 - **`json2csv.exceptions`**: The centralized error boundary of the application, isolating engine-specific and operational failures from interpreter-level panics.
 - **`json2csv.converter`**: The translation and conversion module responsible for flattening hierarchical structures, parsing JSON arrays, reconciling dynamic headers, and mapping/serializing objects into 2D tabular CSV formats.
+- **`json2csv.main`**: The command-line interface driver module responsible for argument parsing, validation, escape sequence decoding, and exception orchestration.
 
 ## 3. Public Interfaces & Signatures
 ### `json2csv.exceptions`
@@ -50,6 +51,18 @@ Provides utilities for structural transformation, hierarchical flattening, and b
     - `NotAnArrayError`: If the parsed JSON root structure is not a list.
     - `NamespaceCollisionError`: If structural flattening of records yields conflicting key paths.
 
+### `json2csv.main`
+The primary operational entry point driver of the system:
+
+- `def main(args: list[str] | None = None) -> int`:
+  - **Description**: Parses command-line arguments, decodes escapes within delimiters, executes the conversion pipeline, and translates custom engine exceptions into appropriate command-line exit codes.
+  - **Inputs**:
+    - `args` (list[str] | None): Optional list of command-line argument strings. Falls back to `sys.argv[1:]` if `None`.
+  - **Outputs**:
+    - Returns an integer exit code (0 for success, 1 for validation/format/syntax/collision errors, 2 for environmental/IO errors).
+  - **Exceptions**:
+    - None (internally catches and suppresses all exceptions, routing user-friendly messages to `sys.stderr` and returning non-zero exit codes).
+
 ## 4. Design Patterns & Decisions
 - **Unified Exception Boundary**: By mapping all operational, format, and environment errors to subclasses of `JSON2CSVError`, the CLI driver layer can capture all anticipated engine failures cleanly. This allows the CLI to output user-friendly error messages and exit gracefully with non-zero codes, preventing internal raw Python interpreter stack traces from leaking to the shell.
 - **Strict Precedence-Ordered Error Validation**: To ensure highly deterministic behavior, the conversion execution strictly follows a validated precedence sequence:
@@ -64,6 +77,13 @@ Provides utilities for structural transformation, hierarchical flattening, and b
 - **Identity-Based Cycle Detection**: Circular references are resolved deterministically using a visited set tracking internal object identifiers (`id(obj)`). This prevents infinite recursion during deep dictionary traversals without requiring external structural graph packages.
 - **Dynamic Header Reconciliation**: Output CSV files are constructed using a dynamic union of all unique keys discovered across all objects in the flattened array. Keys are collected preserving insertion and discovery order across all records, ensuring that missing fields are gracefully written as empty cells without compromising structure.
 - **Graceful Empty State Resolution**: An empty JSON array input `[]` bypasses the dynamic header compilation logic completely. It is handled as a successful edge case that writes an empty file and terminates cleanly, without throwing structural or format exceptions.
+- **Test-Safe CLI Entry Point (No Global State)**: The `main` function accepts an optional `args` parameter list, preventing global state modifications and registration conflicts when parsing arguments inside automated testing suites.
+- **Unicode Escape Delimiter Resolution**: Custom delimiters are decoded using `.encode('utf-8').decode('unicode_escape')` to seamlessly support standard terminal escape sequences like `\t` (tab), `\n` (newline), and `\r` (carriage return).
+- **Early-Exit Delimiter Precedence**: Delimiter verification occurs immediately after parsing, prioritizing character length checks over all file and structural conversion operations. An invalid delimiter length yields an immediate Exit Code 1, even if target files do not exist.
+- **CLI Exit Code Register**: System exit codes are deterministically separated:
+  - `0`: Successful execution.
+  - `1`: Syntax, logic, format, validation, parsing, or structural errors (e.g., invalid delimiter length, malformed JSON, structures that are not arrays, namespace collisions).
+  - `2`: Environment, OS, File, and IO exceptions (e.g., input file missing, lack of read permissions, unwritable target path).
 
 ## 5. Non-Functional Invariants & Constraints
 - **File Encoding**: All source, configuration, and documentation files must be explicitly encoded using UTF-8.
@@ -75,3 +95,4 @@ Provides utilities for structural transformation, hierarchical flattening, and b
 - **Traceability Preservation**: The exception hierarchy must accept and preserve original traceback states via explicit exception chaining.
 - **Immutability of Source Data**: Traversal operations must be strictly read-only relative to their input datasets. The original dictionaries passed to the flattening engine must not be mutated, augmented, or restructured in-place.
 - **Structural Sequence Preservation**: Arrays, sequences, or lists of objects and primitives inside dictionaries must remain intact as raw array structures. The flattening engine must not unpack or flatten arrays into indexed sub-keys, preserving them for raw serialization during final CSV writing.
+- **Startup Overhead Limits**: Initial boot-up, argument parsing, and delimiter length validation processes must strictly execute within 10 milliseconds.
