@@ -10,7 +10,7 @@ class InvalidJSONFormatError(JSON2CSVError):
     """Raised when source JSON document cannot be successfully parsed by the internal engine."""
 
 
-class NotAnArrayError(JSON2CSVError):
+class NotAnArrayError(InvalidJSONFormatError):
     """Raised when the root parsed element is not a JSON list/array."""
 
 

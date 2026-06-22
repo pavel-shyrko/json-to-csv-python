@@ -1,4 +1,102 @@
-from json2csv.exceptions import NamespaceCollisionError
+import csv
+import json
+import os
+
+from json2csv.exceptions import (
+    FileAccessError,
+    InvalidJSONFormatError,
+    NamespaceCollisionError,
+    NotAnArrayError,
+)
+
+
+def convert_json_to_csv(input_path: str, output_path: str, delimiter: str) -> None:
+    """
+    Reads, parses, flattens, and translates target JSON files to CSV files.
+
+    Args:
+        input_path (str): File system path to the input JSON file.
+        output_path (str): File system path to the output CSV file.
+        delimiter (str): Cell separator character sequence (must be exactly 1 char).
+
+    Raises:
+        TypeError: If input parameters are not of type str.
+        FileAccessError: If input/output files or paths are inaccessible.
+        InvalidJSONFormatError: If the file cannot be parsed as valid JSON.
+        NotAnArrayError: If parsed JSON root is not a list.
+        NamespaceCollisionError: If structural flattening results in duplicated keys.
+    """
+    if not isinstance(input_path, str) or isinstance(input_path, bool):
+        raise TypeError(f"input_path must be str, got {type(input_path).__name__}")
+    if not isinstance(output_path, str) or isinstance(output_path, bool):
+        raise TypeError(f"output_path must be str, got {type(output_path).__name__}")
+    if not isinstance(delimiter, str) or isinstance(delimiter, bool):
+        raise TypeError(f"delimiter must be str, got {type(delimiter).__name__}")
+
+    if len(delimiter) != 1:
+        raise ValueError(
+            f"delimiter must be exactly 1 character, got length {len(delimiter)}"
+        )
+
+    try:
+        with open(input_path, "r", encoding="utf-8") as fh:
+            raw = fh.read()
+    except OSError as err:
+        raise FileAccessError(f"Cannot read input file '{input_path}'") from err
+
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as err:
+        raise InvalidJSONFormatError(f"Failed to parse JSON: {err}") from err
+
+    if not isinstance(data, list):
+        raise NotAnArrayError(
+            f"JSON root must be a list, got {type(data).__name__}"
+        )
+
+    if not data:
+        output_dir = os.path.dirname(output_path) or "."
+        if not os.path.isdir(output_dir):
+            raise FileAccessError(
+                f"Output directory does not exist: '{output_dir}'"
+            )
+        try:
+            with open(output_path, "w", encoding="utf-8"):
+                pass
+        except OSError as err:
+            raise FileAccessError(f"Cannot write output file '{output_path}'") from err
+        return
+
+    flattened_rows: list[dict] = []
+    headers_ordered: list[str] = []
+    headers_seen: set[str] = set()
+
+    for record in data:
+        flat = flatten_dict(record)
+        flattened_rows.append(flat)
+        for key in flat:
+            if key not in headers_seen:
+                headers_ordered.append(key)
+                headers_seen.add(key)
+
+    output_dir = os.path.dirname(output_path) or "."
+    if not os.path.isdir(output_dir):
+        raise FileAccessError(f"Output directory does not exist: '{output_dir}'")
+
+    try:
+        with open(output_path, "w", encoding="utf-8", newline="") as fh:
+            writer = csv.DictWriter(
+                fh,
+                fieldnames=headers_ordered,
+                delimiter=delimiter,
+                quoting=csv.QUOTE_MINIMAL,
+                extrasaction="ignore",
+                restval="",
+            )
+            writer.writeheader()
+            writer.writerows(flattened_rows)
+    except OSError as err:
+        raise FileAccessError(f"Cannot write output file '{output_path}'") from err
 
 
 def flatten_dict(d: dict, prefix: str = "", separator: str = ".") -> dict:
